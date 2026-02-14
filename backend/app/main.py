@@ -286,9 +286,15 @@ async def analyze_full(request: FullAnalysisRequest) -> FullAnalysisResponse:
     Unified analysis endpoint: risk profile, allergens, RecipeDB search,
     ingredient swaps via FlavorDB, and improved profile comparison.
 
-    Supports two modes:
-    - Custom input: provide recipe_name + ingredients
-    - RecipeDB lookup: provide only recipe_name (fetches from RecipeDB)
+    When only recipe_name is provided (RecipeDB lookup mode):
+    1. Recipe and ingredients are fetched from RecipeDB.
+    2. Nutrition data (calories, protein, carbs, fat, etc.) is taken from RecipeDB.
+    3. Health score is calculated from that nutrition via the health_scorer pipeline.
+    4. Swap suggestions are generated (LLM agent or rule-based + FlavorDB) and
+       projected health score is computed from the same pipeline.
+
+    Custom input mode: provide recipe_name + ingredients (nutrition from RecipeDB if
+    recipe is found, else ingredient-based estimate).
     """
     try:
         logger.info(f"Full analysis for: {request.recipe_name}")
@@ -431,10 +437,12 @@ async def analyze_full(request: FullAnalysisRequest) -> FullAnalysisResponse:
             )
 
         # Fallback nutrition estimates when RecipeDB data unavailable (custom ingredients only)
+        used_llm_fallback = False
         if nutrition_data is None:
             from app.utils.helpers import estimate_nutrition_from_ingredients
             logger.warning("⚠️ Using ingredient-based nutrition estimate (RecipeDB not available)")
             nutrition_data = estimate_nutrition_from_ingredients(ingredients)
+            used_llm_fallback = True
         if micro_nutrition_data is None:
             logger.warning("⚠️ Using FALLBACK micronutrient data - API call may have failed!")
             micro_nutrition_data = {
@@ -664,6 +672,7 @@ async def analyze_full(request: FullAnalysisRequest) -> FullAnalysisResponse:
             score_improvement=score_improvement,
             explanation=explanation,
             agent_metadata=agent_metadata,
+            used_llm_fallback=used_llm_fallback,
         )
 
     except HTTPException:
@@ -1097,6 +1106,68 @@ async def recalculate_score(request: RecalculateRequest) -> RecalculateResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to recalculate score: {str(e)}"
         )
+
+
+@app.get("/debug/cosylab-test")
+async def cosylab_debug_test():
+    """
+    Debug endpoint to compare CosyLab API requests with Postman.
+    
+    Returns the exact URL, headers (key redacted), params, and raw response
+    from CosyLab RecipeDB. Use this to align the app with your working
+    Postman request.
+    
+    Compare:
+    1. URL structure (base URL + endpoint path)
+    2. Header name and format (x-api-key vs Authorization vs api_key query param)
+    3. Query parameter names (title vs recipe_title, etc.)
+    """
+    base_url = (settings.RECIPEDB_BASE_URL or "").rstrip("/")
+    use_bearer = getattr(settings, "RECIPEDB_USE_BEARER_AUTH", False)
+    org_endpoint = getattr(settings, "RECIPEDB_ORG_ENDPOINT", "recipesinfo") or "recipesinfo"
+    if use_bearer:
+        endpoint = org_endpoint
+        params = {"page": 1, "limit": 10}
+    else:
+        endpoint = "recipe_by_title"
+        params = {"title": "pasta"}
+    url = f"{base_url}/{endpoint}"
+    api_key = settings.COSYLAB_API_KEY or ""
+    headers = {"Accept": "application/json"}
+    if api_key:
+        if use_bearer:
+            headers["Authorization"] = f"Bearer {api_key}"
+        else:
+            headers["x-api-key"] = api_key
+    
+    debug = {
+        "request": {
+            "method": "GET",
+            "url": url,
+            "params": params,
+            "headers": {k: ("***REDACTED***" if k.lower() in ("x-api-key", "authorization") else v) for k, v in headers.items()},
+            "api_key_loaded": bool(api_key),
+            "api_key_length": len(api_key),
+        },
+        "response": None,
+    }
+    
+    try:
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        debug["response"] = {
+            "status_code": resp.status_code,
+            "reason": resp.reason,
+            "headers": dict(resp.headers),
+            "body_preview": resp.text[:1000] if resp.text else None,
+        }
+        try:
+            debug["response"]["body_json"] = resp.json()
+        except Exception:
+            pass
+    except requests.exceptions.RequestException as e:
+        debug["response"] = {"error": str(e), "error_type": type(e).__name__}
+    
+    return debug
 
 
 @app.get("/health")

@@ -17,6 +17,37 @@ _env_path = Path(__file__).resolve().parent.parent / ".env"
 load_dotenv(dotenv_path=_env_path)
 
 
+def _recipedb_timeout_from_env() -> Optional[int]:
+    try:
+        v = os.getenv("RECIPEDB_TIMEOUT", "0")
+        n = int(v) if v else 0
+        return n if n > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _float_env(name: str, default: float, min_val: float, max_val: float) -> float:
+    try:
+        v = os.getenv(name)
+        if v is None:
+            return default
+        f = float(v)
+        return max(min_val, min(max_val, f))
+    except (TypeError, ValueError):
+        return default
+
+
+def _int_env(name: str, default: int, min_val: int, max_val: int) -> int:
+    try:
+        v = os.getenv(name)
+        if v is None:
+            return default
+        n = int(v)
+        return max(min_val, min(max_val, n))
+    except (TypeError, ValueError):
+        return default
+
+
 class Settings(BaseModel):
     """
     Application configuration settings.
@@ -40,7 +71,7 @@ class Settings(BaseModel):
     
     # API Configuration
     RECIPEDB_BASE_URL: str = Field(
-        default="https://cosylab.iiitd.edu.in/recipedb/search_recipedb",
+        default_factory=lambda: os.getenv("RECIPEDB_BASE_URL", "https://cosylab.iiitd.edu.in/recipedb/search_recipedb"),
         description="Base URL for RecipeDB API"
     )
     
@@ -55,6 +86,24 @@ class Settings(BaseModel):
         description="API key for RecipeDB and FlavorDB (cosylab.iiitd.edu.in)"
     )
 
+    # RecipeDB org API uses Bearer token; public API uses x-api-key
+    RECIPEDB_USE_BEARER_AUTH: bool = Field(
+        default_factory=lambda: os.getenv("RECIPEDB_USE_BEARER_AUTH", "false").lower() in ("true", "1", "yes"),
+        description="Use Authorization: Bearer token (org API) instead of x-api-key"
+    )
+
+    # Org API endpoint name (e.g. recipesinfo, recipes). Only used when RECIPEDB_USE_BEARER_AUTH=true.
+    RECIPEDB_ORG_ENDPOINT: str = Field(
+        default_factory=lambda: os.getenv("RECIPEDB_ORG_ENDPOINT", "recipesinfo").strip() or "recipesinfo",
+        description="Org API list endpoint name (recipesinfo or recipes)"
+    )
+
+    # Optional: when primary RecipeDB URL times out or is unreachable, try this base URL once (e.g. public API).
+    RECIPEDB_FALLBACK_BASE_URL: Optional[str] = Field(
+        default_factory=lambda: (os.getenv("RECIPEDB_FALLBACK_BASE_URL") or "").strip() or None,
+        description="Fallback base URL if primary is unreachable (e.g. https://cosylab.iiitd.edu.in/recipedb/search_recipedb)"
+    )
+
     # API Timeouts
     API_TIMEOUT: int = Field(
         default=10,
@@ -62,7 +111,25 @@ class Settings(BaseModel):
         le=60,
         description="API request timeout in seconds"
     )
-    
+    RECIPEDB_TIMEOUT: Optional[int] = Field(
+        default_factory=lambda: _recipedb_timeout_from_env(),
+        description="Override timeout for RecipeDB only (seconds). 0 or unset = use API_TIMEOUT."
+    )
+    # Rate limit: min seconds between RecipeDB requests (0 = disabled). Reduces risk of IP blocking.
+    RECIPEDB_RATE_LIMIT_DELAY: float = Field(
+        default_factory=lambda: _float_env("RECIPEDB_RATE_LIMIT_DELAY", 0.5, 0.0, 60.0),
+        ge=0.0,
+        le=60.0,
+        description="Min seconds between RecipeDB API requests (0=off)"
+    )
+    # Max pages to search when looking up recipe by name (1 page = 200 recipes). Lower = fewer requests.
+    RECIPEDB_MAX_SEARCH_PAGES: int = Field(
+        default_factory=lambda: _int_env("RECIPEDB_MAX_SEARCH_PAGES", 5, 1, 20),
+        ge=1,
+        le=20,
+        description="Max pagination pages when searching recipe by name (org API)"
+    )
+
     # Health Score Configuration
     MIN_HEALTHY_SCORE: float = Field(
         default=60.0,

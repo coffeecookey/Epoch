@@ -12,6 +12,9 @@ import { recipeApi, ApiError } from "@/services/api";
 import { addRecipe } from "@/store/recipeStore";
 import type { FullAnalysisResponse, RecalculateResponse, AnalyzeRequest } from "@/types/api";
 import { AlertCircle, ArrowLeft, BookmarkPlus } from "lucide-react";
+import { toast } from "sonner";
+
+const FALLBACK_TOAST_DISABLED_KEY = "nutritwin-disable-fallback-toast";
 
 export default function RecipeAnalysis() {
   const navigate = useNavigate();
@@ -35,6 +38,30 @@ export default function RecipeAnalysis() {
       const response = await recipeApi.analyzeFull(apiPayload);
       setAnalysisData(response);
       setStep("results");
+
+      // Show toast when CosyLab was unavailable and fallback LLM/rule-based was used
+      if (response.used_llm_fallback) {
+        const disabled = localStorage.getItem(FALLBACK_TOAST_DISABLED_KEY) === "true";
+        if (!disabled) {
+          const toastId = toast(
+            "Fallback LLM is working",
+            {
+              description: (
+                <button
+                  type="button"
+                  className="text-red-600 hover:underline cursor-pointer text-left"
+                  onClick={() => {
+                    localStorage.setItem(FALLBACK_TOAST_DISABLED_KEY, "true");
+                    toast.dismiss(toastId);
+                  }}
+                >
+                  Disable toaster
+                </button>
+              ),
+            }
+          );
+        }
+      }
     } catch (err) {
       if (err instanceof ApiError) {
         setError(err.message);
