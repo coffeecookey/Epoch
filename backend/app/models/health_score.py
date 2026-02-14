@@ -246,3 +246,9 @@ class FullAnalysisResponse(BaseModel):
         None,
         description="LLM swap agent metadata (confidence, APIs called, iterations, etc.)"
     )
+
+    # Indicates CosyLab was unavailable and fallback (LLM/rule-based) was used
+    used_llm_fallback: bool = Field(
+        default=False,
+        description="True when CosyLab API was not responsive and fallback was used"
+    )

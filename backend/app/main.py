@@ -404,10 +404,12 @@ async def analyze_full(request: FullAnalysisRequest) -> FullAnalysisResponse:
             )
 
         # Fallback nutrition estimates when RecipeDB data unavailable (custom ingredients only)
+        used_llm_fallback = False
         if nutrition_data is None:
             from app.utils.helpers import estimate_nutrition_from_ingredients
             logger.warning("⚠️ Using ingredient-based nutrition estimate (RecipeDB not available)")
             nutrition_data = estimate_nutrition_from_ingredients(ingredients)
+            used_llm_fallback = True
         if micro_nutrition_data is None:
             logger.warning("⚠️ Using FALLBACK micronutrient data - API call may have failed!")
             micro_nutrition_data = {
@@ -637,6 +639,7 @@ async def analyze_full(request: FullAnalysisRequest) -> FullAnalysisResponse:
             score_improvement=score_improvement,
             explanation=explanation,
             agent_metadata=agent_metadata,
+            used_llm_fallback=used_llm_fallback,
         )
 
     except HTTPException:

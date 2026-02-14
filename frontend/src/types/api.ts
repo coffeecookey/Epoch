@@ -60,6 +60,8 @@ export interface FullAnalysisResponse {
   score_improvement: number | null;
   explanation: string | null;
   agent_metadata?: Record<string, any>;
+  /** True when CosyLab API was not responsive and fallback was used */
+  used_llm_fallback?: boolean;
 }
 
 export interface AnalyzeRequest {
