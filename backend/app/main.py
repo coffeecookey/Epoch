@@ -259,9 +259,15 @@ async def analyze_full(request: FullAnalysisRequest) -> FullAnalysisResponse:
     Unified analysis endpoint: risk profile, allergens, RecipeDB search,
     ingredient swaps via FlavorDB, and improved profile comparison.
 
-    Supports two modes:
-    - Custom input: provide recipe_name + ingredients
-    - RecipeDB lookup: provide only recipe_name (fetches from RecipeDB)
+    When only recipe_name is provided (RecipeDB lookup mode):
+    1. Recipe and ingredients are fetched from RecipeDB.
+    2. Nutrition data (calories, protein, carbs, fat, etc.) is taken from RecipeDB.
+    3. Health score is calculated from that nutrition via the health_scorer pipeline.
+    4. Swap suggestions are generated (LLM agent or rule-based + FlavorDB) and
+       projected health score is computed from the same pipeline.
+
+    Custom input mode: provide recipe_name + ingredients (nutrition from RecipeDB if
+    recipe is found, else ingredient-based estimate).
     """
     try:
         logger.info(f"Full analysis for: {request.recipe_name}")
@@ -1089,10 +1095,11 @@ async def cosylab_debug_test():
     2. Header name and format (x-api-key vs Authorization vs api_key query param)
     3. Query parameter names (title vs recipe_title, etc.)
     """
-    base_url = settings.RECIPEDB_BASE_URL
+    base_url = (settings.RECIPEDB_BASE_URL or "").rstrip("/")
     use_bearer = getattr(settings, "RECIPEDB_USE_BEARER_AUTH", False)
+    org_endpoint = getattr(settings, "RECIPEDB_ORG_ENDPOINT", "recipesinfo") or "recipesinfo"
     if use_bearer:
-        endpoint = "recipesinfo"
+        endpoint = org_endpoint
         params = {"page": 1, "limit": 10}
     else:
         endpoint = "recipe_by_title"
