@@ -42,8 +42,20 @@ from app.services.flavordb_service import FlavorDBService
 from app.services.flavordb_extended import FlavorDBExtendedService
 from app.services.swap_engine import SwapEngine
 from app.services.llm_explainer import LLMExplainer
-from app.services.llm_swap_agent import LLMSwapAgent
+try:
+    from app.services.llm_swap_agent import LLMSwapAgent, GENAI_AVAILABLE
+except Exception:
+    LLMSwapAgent = None
+    GENAI_AVAILABLE = False
 from app.services.quick_meal_service import QuickMealService
+from app.services.craving_service import CravingService
+from app.models.craving import (
+    CravingRequest,
+    CravingReplacement,
+    CravingHistoryEntry,
+    CravingPattern,
+    CravingPatternAnalysis,
+)
 from app.config import settings
 
 # Configure logging
@@ -124,12 +136,27 @@ swap_engine = SwapEngine(
 llm_explainer = LLMExplainer() if settings.USE_LLM_EXPLANATIONS else None
 quick_meal_service = QuickMealService(recipedb_service)
 
+# Initialize Craving Replacement Service
+_craving_llm = None
+if settings.GEMINI_API_KEY:
+    _craving_llm = LLMExplainer(use_templates=False, api_key=settings.GEMINI_API_KEY)
+craving_service = CravingService(
+    recipedb_service=recipedb_service,
+    flavordb_service=flavordb_service,
+    health_scorer=health_scorer,
+    llm_explainer=_craving_llm,
+)
+
 # Initialize LLM swap agent (if configured)
 llm_swap_agent = None
-if settings.USE_LLM_AGENT and settings.GEMINI_API_KEY:
-    flavordb_extended = FlavorDBExtendedService()
-    llm_swap_agent = LLMSwapAgent(flavordb_extended, recipedb_service)
-    logger.info("LLM swap agent initialized (Gemini)")
+if settings.USE_LLM_AGENT and settings.GEMINI_API_KEY and GENAI_AVAILABLE and LLMSwapAgent is not None:
+    try:
+        flavordb_extended = FlavorDBExtendedService()
+        llm_swap_agent = LLMSwapAgent(flavordb_extended, recipedb_service)
+        logger.info("LLM swap agent initialized (Gemini)")
+    except Exception as e:
+        logger.warning(f"Failed to initialize LLM swap agent: {e}")
+        llm_swap_agent = None
 else:
     logger.info("LLM swap agent disabled — using rule-based swap engine")
 
@@ -1429,6 +1456,66 @@ async def delete_profile(profile_id: str):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete profile: {str(e)}"
+        )
+
+
+# ==================== Craving Replacement Endpoints ====================
+
+@app.post("/cravings/replace", response_model=CravingReplacement)
+async def craving_replace(request: CravingRequest) -> CravingReplacement:
+    """
+    Process a craving and return personalised healthier replacements.
+
+    Returns quick combos (2-3 ingredient ideas) and full RecipeDB recipes,
+    along with a psychological insight and science explanation.
+    """
+    try:
+        logger.info(f"Craving replacement request: {request.craving_text}")
+        result = craving_service.process_craving(request)
+        return result
+    except Exception as e:
+        logger.error(f"Error processing craving: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process craving: {str(e)}",
+        )
+
+
+@app.post("/cravings/patterns", response_model=CravingPatternAnalysis)
+async def craving_patterns(history: List[CravingHistoryEntry]) -> CravingPatternAnalysis:
+    """
+    Analyse craving history (sent from frontend localStorage) and return
+    detected patterns, weekly summary, and encouragement messages.
+    """
+    try:
+        logger.info(f"Craving pattern analysis for {len(history)} entries")
+        result = craving_service.analyze_patterns(history)
+
+        # Optionally enrich with LLM insights
+        if _craving_llm and result.weekly_summary:
+            try:
+                llm_patterns = _craving_llm.generate_craving_pattern_insights(
+                    result.weekly_summary
+                )
+                if llm_patterns:
+                    for desc in llm_patterns:
+                        result.patterns.append(
+                            CravingPattern(
+                                pattern_description=desc,
+                                frequency=0,
+                                trigger="ai-detected",
+                                top_time="various",
+                            )
+                        )
+            except Exception as e:
+                logger.warning(f"LLM pattern enrichment failed: {e}")
+
+        return result
+    except Exception as e:
+        logger.error(f"Error analysing craving patterns: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to analyse craving patterns: {str(e)}",
         )
 
 

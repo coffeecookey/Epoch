@@ -191,3 +191,108 @@ export interface UserProfile {
   created_at: string;
 }
 
+// ===================== Craving Replacement System =====================
+
+export type FlavorType = "sweet" | "salty" | "crunchy" | "spicy" | "umami" | "creamy";
+export type MoodType = "stressed" | "bored" | "tired" | "happy" | "anxious" | "sad";
+export type TimeOfDay = "morning" | "afternoon" | "evening" | "late-night";
+
+export interface CravingRequest {
+  craving_text: string;
+  flavor_type: FlavorType;
+  mood?: MoodType;
+  time_of_day: TimeOfDay;
+  context?: string;
+  user_allergens?: string[];
+  user_avoid_ingredients?: string[];
+  diet_type?: string;
+}
+
+export interface QuickCombo {
+  name: string;
+  ingredients: string[];
+  prep_time_minutes: number;
+  why_it_works: string;
+  flavor_match: string;
+  calories_estimate?: number;
+}
+
+export interface CravingRecipe {
+  id?: string;
+  name: string;
+  cuisine?: string;
+  diet_type?: string;
+  ingredients: string[];
+  prep_time?: number;
+  health_score?: number;
+}
+
+export interface CravingReplacement {
+  original_craving: string;
+  flavor_type: string;
+  psychological_insight: string;
+  quick_combos: QuickCombo[];
+  full_recipes: CravingRecipe[];
+  science_explanation: string;
+  encouragement?: string;
+}
+
+export interface CravingHistoryEntry {
+  id: string;
+  craving_text: string;
+  flavor_type: string;
+  mood?: string;
+  time_of_day: string;
+  context?: string;
+  replacement_chosen?: string;
+  timestamp: string;
+}
+
+export interface CravingPattern {
+  pattern_description: string;
+  frequency: number;
+  trigger: string;
+  top_time: string;
+  top_mood?: string;
+}
+
+export interface CravingPatternAnalysis {
+  patterns: CravingPattern[];
+  weekly_summary: Record<string, any>;
+  encouragement_messages: string[];
+}
+
+export interface CravingStats {
+  totalLogged: number;
+  replacementsChosen: number;
+  topFlavor: string | null;
+  topMood: string | null;
+  topTime: string | null;
+  replacementRate: number;
+}
+
+export const FLAVOR_OPTIONS: { value: FlavorType; label: string }[] = [
+  { value: "sweet", label: "Sweet" },
+  { value: "salty", label: "Salty" },
+  { value: "crunchy", label: "Crunchy" },
+  { value: "spicy", label: "Spicy" },
+  { value: "umami", label: "Umami" },
+  { value: "creamy", label: "Creamy" },
+];
+
+export const MOOD_OPTIONS: { value: MoodType; label: string }[] = [
+  { value: "stressed", label: "Stressed" },
+  { value: "bored", label: "Bored" },
+  { value: "tired", label: "Tired" },
+  { value: "happy", label: "Happy" },
+  { value: "anxious", label: "Anxious" },
+  { value: "sad", label: "Sad" },
+];
+
+export const TIME_OPTIONS: { value: TimeOfDay; label: string }[] = [
+  { value: "morning", label: "Morning" },
+  { value: "afternoon", label: "Afternoon" },
+  { value: "evening", label: "Evening" },
+  { value: "late-night", label: "Late Night" },
+];
+

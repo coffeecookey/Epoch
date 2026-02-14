@@ -301,3 +301,86 @@ class LLMExplainer:
         """
         logger.warning("LLM API not implemented - falling back to template")
         return self._template_analysis_summary(full_analysis)
+
+    # ==================================================================
+    # Craving Replacement System — LLM-backed insight generation
+    # ==================================================================
+
+    def generate_craving_insight(self, craving_request) -> Optional[str]:
+        """
+        Generate a 1-2 sentence psychological insight for a craving using Gemini.
+
+        Falls back to None so the caller can use template constants.
+        """
+        if not self.api_key:
+            return None
+
+        try:
+            from google import genai
+
+            client = genai.Client(api_key=self.api_key)
+            prompt = (
+                "You are a nutrition psychologist. In 2 sentences, explain the "
+                "psychological or physiological reason why someone would crave "
+                f"'{craving_request.craving_text}' "
+                f"(flavor: {craving_request.flavor_type.value}) "
+                f"at {craving_request.time_of_day.value}"
+            )
+            if craving_request.mood:
+                prompt += f" while feeling {craving_request.mood.value}"
+            if craving_request.context:
+                prompt += f" (context: {craving_request.context})"
+            prompt += ". Be specific and evidence-based. No bullet points."
+
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+            )
+            text = response.text.strip() if response and response.text else None
+            if text:
+                logger.info("LLM craving insight generated successfully")
+            return text
+        except Exception as e:
+            logger.warning(f"LLM craving insight failed: {e}")
+            return None
+
+    def generate_craving_pattern_insights(
+        self, history_summary: Dict
+    ) -> Optional[List[str]]:
+        """
+        Ask Gemini to identify non-obvious patterns in craving history.
+
+        Args:
+            history_summary: Aggregated stats dict (top_flavor, top_mood, etc.)
+
+        Returns:
+            List of human-readable pattern strings, or None on failure.
+        """
+        if not self.api_key:
+            return None
+
+        try:
+            from google import genai
+
+            client = genai.Client(api_key=self.api_key)
+            prompt = (
+                "You are a nutrition psychologist analysing a user's craving log "
+                "summary. Identify up to 3 actionable behavioural patterns from:\n"
+                f"{history_summary}\n"
+                "Return each pattern as a single sentence. No intro text."
+            )
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+            )
+            if response and response.text:
+                lines = [
+                    line.strip().lstrip("•-0123456789. ")
+                    for line in response.text.strip().split("\n")
+                    if line.strip()
+                ]
+                return lines[:3] if lines else None
+            return None
+        except Exception as e:
+            logger.warning(f"LLM pattern insight failed: {e}")
+            return None

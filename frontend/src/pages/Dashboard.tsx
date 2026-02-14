@@ -3,11 +3,13 @@ import { motion } from "framer-motion";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { NavLink } from "@/components/NavLink";
-import { TrendingUp, ChefHat, Users, Activity, AlertCircle } from "lucide-react";
+import { TrendingUp, ChefHat, Users, Activity, AlertCircle, Flame } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useLocation } from "react-router-dom";
 import { recipeApi, ApiError } from "@/services/api";
 import { getRecipes, subscribeToRecipeStore } from "@/store/recipeStore";
+import { getCravingStats, subscribeToCravingStore } from "@/store/cravingStore";
+import type { CravingStats } from "@/types/api";
 
 function computeRecipeStats() {
   const recipes = getRecipes();
@@ -33,6 +35,7 @@ export default function Dashboard() {
   const [profileCount, setProfileCount] = useState<number | null>(null);
   const [profilesLoading, setProfilesLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [cravingStats, setCravingStats] = useState<CravingStats>(getCravingStats);
 
   const refreshStats = () => {
     setRecipeStats(computeRecipeStats());
@@ -56,6 +59,11 @@ export default function Dashboard() {
   useEffect(() => {
     const unsubscribe = subscribeToRecipeStore(() => setRecipeStats(computeRecipeStats()));
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const unsub = subscribeToCravingStore(() => setCravingStats(getCravingStats()));
+    return unsub;
   }, []);
 
   useEffect(() => {
@@ -190,6 +198,12 @@ export default function Dashboard() {
                   Analyze New Recipe
                 </Button>
               </NavLink>
+              <NavLink to="/cravings">
+                <Button variant="outline" size="lg" className="gap-2">
+                  <Flame className="h-4 w-4" />
+                  Log a Craving
+                </Button>
+              </NavLink>
               <NavLink to="/recipes">
                 <Button variant="outline" size="lg" className="gap-2">
                   <ChefHat className="h-4 w-4" />
@@ -205,6 +219,46 @@ export default function Dashboard() {
             </CardContent>
           </Card>
         </motion.div>
+
+        {/* Craving Insights */}
+        {cravingStats.totalLogged > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.35 }}
+            className="mt-8"
+          >
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <div>
+                  <CardTitle className="font-display text-xl">Craving Insights</CardTitle>
+                  <CardDescription>Your craving management progress</CardDescription>
+                </div>
+                <Flame className="h-5 w-5 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold">{cravingStats.totalLogged}</p>
+                    <p className="text-xs text-muted-foreground">Total logged</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold">{cravingStats.replacementsChosen}</p>
+                    <p className="text-xs text-muted-foreground">Replaced</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold">{cravingStats.replacementRate}%</p>
+                    <p className="text-xs text-muted-foreground">Replace rate</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-2xl font-bold capitalize">{cravingStats.topFlavor ?? "-"}</p>
+                    <p className="text-xs text-muted-foreground">Top craving</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        )}
 
         {/* Recent Activity */}
         <motion.div

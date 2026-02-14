@@ -6,6 +6,10 @@ import type {
   Recipe,
   DashboardStats,
   UserProfile,
+  CravingRequest,
+  CravingReplacement,
+  CravingHistoryEntry,
+  CravingPatternAnalysis,
 } from "@/types/api";
 
 const API_BASE_URL = "http://localhost:8000";
@@ -142,5 +146,25 @@ export const recipeApi = {
         method: "DELETE",
       }
     );
+  },
+
+  // ===================== Craving Replacement =====================
+
+  async getCravingReplacement(request: CravingRequest): Promise<CravingReplacement> {
+    return fetchWithError<CravingReplacement>(`${API_BASE_URL}/cravings/replace`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+  },
+
+  async analyzeCravingPatterns(
+    history: CravingHistoryEntry[]
+  ): Promise<CravingPatternAnalysis> {
+    return fetchWithError<CravingPatternAnalysis>(`${API_BASE_URL}/cravings/patterns`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(history),
+    });
   },
 };

@@ -11,8 +11,14 @@ import logging
 import re
 from typing import Dict, List, Optional
 
-from google import genai
-from google.genai import types
+try:
+    from google import genai
+    from google.genai import types
+    GENAI_AVAILABLE = True
+except ImportError:
+    genai = None
+    types = None
+    GENAI_AVAILABLE = False
 
 from app.config import settings
 from app.services.flavordb_extended import FlavorDBExtendedService

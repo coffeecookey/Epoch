@@ -301,3 +301,103 @@ FLAVORDB_ENDPOINTS: Dict[str, str] = {
     "molecules_by_flavor": "molecules_by_flavor_profile",
     "molecules_by_name": "molecules_by_common_name"
 }
+
+
+# ==============================================================================
+# CRAVING REPLACEMENT SYSTEM
+# ==============================================================================
+
+# Map flavor types to RecipeDB search parameters
+FLAVOR_TO_SEARCH_PARAMS: Dict[str, Dict] = {
+    "sweet": {
+        "categories": ["desserts", "snacks", "beverages"],
+        "max_carbs": 30.0,
+        "max_calories": 300,
+    },
+    "salty": {
+        "categories": ["snacks", "appetizers"],
+        "max_calories": 250,
+    },
+    "crunchy": {
+        "categories": ["snacks", "salads", "appetizers"],
+        "max_calories": 250,
+    },
+    "spicy": {
+        "categories": ["snacks", "appetizers", "soups"],
+        "cuisines": ["Indian", "Mexican", "Thai"],
+        "max_calories": 350,
+    },
+    "umami": {
+        "categories": ["soups", "appetizers", "main course"],
+        "max_calories": 400,
+    },
+    "creamy": {
+        "categories": ["desserts", "beverages", "soups"],
+        "max_calories": 300,
+    },
+}
+
+# Map time-of-day to RecipeDB day_category values
+TIME_TO_DAY_CATEGORY: Dict[str, List[str]] = {
+    "morning": ["breakfast"],
+    "afternoon": ["lunch", "snack"],
+    "evening": ["dinner", "snack"],
+    "late-night": ["snack"],
+}
+
+# Map moods to commonly craved flavors (for pattern analysis)
+MOOD_FLAVOR_ASSOCIATIONS: Dict[str, List[str]] = {
+    "stressed": ["sweet", "creamy", "crunchy"],
+    "bored": ["crunchy", "salty", "spicy"],
+    "tired": ["sweet", "creamy", "umami"],
+    "happy": ["sweet", "spicy"],
+    "anxious": ["crunchy", "salty", "creamy"],
+    "sad": ["sweet", "creamy"],
+}
+
+# Template-based psychological insights (flavor_type -> mood -> insight)
+CRAVING_INSIGHT_TEMPLATES: Dict[str, Dict[str, str]] = {
+    "sweet": {
+        "stressed": "Sweet cravings during stress often reflect your body seeking quick energy via glucose. Cortisol, the stress hormone, drives the desire for fast-acting carbohydrates.",
+        "tired": "When fatigued, your body craves sugar for a rapid energy boost. This is linked to depleted glycogen and serotonin levels seeking a quick replenishment.",
+        "sad": "Emotional lows trigger sugar cravings because sugar briefly raises serotonin and dopamine levels, providing a temporary mood lift.",
+        "bored": "Boredom-driven sweet cravings are often about seeking stimulation rather than hunger. Your brain associates sugar with a dopamine reward.",
+        "anxious": "Anxiety can cause sweet cravings as your brain looks for calming neurotransmitters. Sugar temporarily increases serotonin, providing brief relief.",
+        "happy": "Craving something sweet when happy is often about celebrating. Your brain links sweet flavors with reward and positive memories.",
+        "_default": "Sweet cravings are your brain seeking a dopamine reward. The key is to find alternatives that satisfy the same neural pathway without the sugar spike.",
+    },
+    "salty": {
+        "stressed": "Salt cravings under stress may indicate mineral depletion. Stress hormones can affect your electrolyte balance, making salty foods feel extra satisfying.",
+        "bored": "Wanting salty snacks when bored is a common texture-seeking behavior. The crunch and salt together provide sensory stimulation your brain is looking for.",
+        "_default": "Salty cravings can signal dehydration or electrolyte imbalance. They can also be purely habitual, tied to snacking patterns.",
+    },
+    "crunchy": {
+        "stressed": "Craving crunchy foods when stressed is linked to jaw-tension release. The act of crunching serves as a physical outlet for built-up tension.",
+        "bored": "Crunchy cravings during boredom are about sensory stimulation. The auditory and tactile feedback of crunching engages multiple senses.",
+        "anxious": "Crunching foods can serve as a stress-relief mechanism. The repetitive jaw motion has a calming effect similar to other rhythmic behaviors.",
+        "_default": "Crunchy cravings are often about texture and sensory engagement rather than nutrition. Healthier crunchy options can satisfy this need effectively.",
+    },
+    "spicy": {
+        "bored": "Craving spice when bored is your body seeking excitement. Capsaicin triggers endorphin release, creating a mild natural high.",
+        "_default": "Spicy food cravings are tied to endorphin release. Capsaicin activates pain receptors that trigger a pleasurable endorphin rush.",
+    },
+    "umami": {
+        "tired": "Umami cravings when tired suggest your body wants protein and amino acids for recovery. Glutamate-rich foods signal nourishment to your brain.",
+        "_default": "Umami cravings indicate a desire for deep, savory satisfaction. These are often protein and amino-acid related signals from your body.",
+    },
+    "creamy": {
+        "stressed": "Creamy food cravings during stress are connected to comfort-seeking behavior. Fat-rich foods activate reward centers and promote a sense of safety.",
+        "sad": "Wanting creamy foods when sad is classic comfort eating. The smooth texture and fat content trigger calming neurotransmitter release.",
+        "_default": "Creamy cravings are about texture comfort and satiety. Healthy fats can provide the same satisfaction as less nutritious options.",
+    },
+}
+
+# Science explanations for why replacements work (by flavor_type)
+CRAVING_SCIENCE_TEMPLATES: Dict[str, str] = {
+    "sweet": "These alternatives provide natural sugars and complex carbohydrates that give sustained energy without the insulin spike of refined sugar. They still activate dopamine pathways but avoid the crash-and-crave cycle.",
+    "salty": "These options deliver satisfying saltiness with added nutritional value like fiber, protein, or healthy fats. They address the electrolyte need without excess sodium.",
+    "crunchy": "These crunchy alternatives provide the same tactile and auditory satisfaction. The physical act of crunching activates the same stress-relief pathways while delivering better nutrition.",
+    "spicy": "Spicy alternatives still trigger endorphin release through capsaicin while adding nutritional benefits. The heat satisfaction is maintained without excess calories or sodium.",
+    "umami": "Umami-rich alternatives provide glutamate and amino acids that satisfy deep savory cravings. They deliver protein and minerals that your body is actually signaling for.",
+    "creamy": "These alternatives provide healthy fats and smooth textures that activate the same comfort-seeking reward centers. They deliver sustained satiety instead of a brief sugar-fat spike.",
+}
