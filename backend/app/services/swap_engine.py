@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 from app.services.flavordb_service import FlavorDBService
 from app.services.health_scorer import HealthScorer
+from app.services.semantic_similarity import compute_similarity_scores
 from app.utils.constants import HEALTHY_SWAPS
 from app.utils.helpers import normalize_ingredient_name, categorize_ingredient
 
@@ -81,7 +82,9 @@ class SwapEngine:
     def __init__(
         self,
         flavordb_service: FlavorDBService,
-        health_scorer: HealthScorer
+        health_scorer: HealthScorer,
+        use_semantic_rerank: bool = True,
+        semantic_weight: float = 0.1,
     ):
         """
         Initialize swap engine with required services.
@@ -89,18 +92,27 @@ class SwapEngine:
         Args:
             flavordb_service: FlavorDB service instance
             health_scorer: Health scorer instance
+            use_semantic_rerank: Use sentence-transformers for semantic re-ranking
+            semantic_weight: Weight for semantic similarity (flavor+health+semantic sum to 1.0)
         """
         self.flavordb_service = flavordb_service
         self.health_scorer = health_scorer
         self.healthy_swaps = HEALTHY_SWAPS
+        self.use_semantic_rerank = use_semantic_rerank
+        self.semantic_weight = semantic_weight
         
         # Ranking weights (must sum to 1.0)
-        self.flavor_weight = 0.6  # 60% weight on flavor match
-        self.health_weight = 0.4  # 40% weight on health improvement
+        if use_semantic_rerank:
+            self.flavor_weight = 0.6 - semantic_weight  # e.g. 0.5 when semantic=0.1
+            self.health_weight = 0.4
+        else:
+            self.flavor_weight = 0.6
+            self.health_weight = 0.4
         
         logger.info(
             f"SwapEngine initialized with flavor_weight={self.flavor_weight}, "
             f"health_weight={self.health_weight}"
+            + (f", semantic_weight={self.semantic_weight} (rerank enabled)" if use_semantic_rerank else "")
         )
     
     def find_substitutes(
@@ -320,6 +332,25 @@ class SwapEngine:
                     f"Error processing candidate {candidate}: {str(e)}"
                 )
                 continue
+        
+        # Semantic re-ranking (Phase 1: transformer replacement)
+        if self.use_semantic_rerank and substitute_options:
+            original_ingredient = target_flavor.get("ingredient", "")
+            candidate_names = [opt.name for opt in substitute_options]
+            ranked_semantic = compute_similarity_scores(original_ingredient, candidate_names)
+            if ranked_semantic:
+                semantic_map = {name: score for name, score in ranked_semantic}
+                for opt in substitute_options:
+                    semantic_score = semantic_map.get(opt.name, 50.0)  # 50 = neutral if missing
+                    opt.rank_score = (
+                        (opt.flavor_match * self.flavor_weight) +
+                        (opt.health_improvement * self.health_weight) +
+                        (semantic_score * self.semantic_weight)
+                    )
+                logger.debug(
+                    "Applied semantic re-ranking. Top semantic matches: %s",
+                    ranked_semantic[:3] if len(ranked_semantic) >= 3 else ranked_semantic,
+                )
         
         # Sort by rank score (descending)
         substitute_options.sort(key=lambda x: x.rank_score, reverse=True)

@@ -5,13 +5,16 @@ This module defines the application settings using Pydantic's BaseSettings
 for environment variable support and type validation.
 """
 
+from pathlib import Path
+
 from pydantic import BaseModel, Field, validator
 from typing import Optional
 import os
 from dotenv import load_dotenv
 
-# Load .env file before Settings is instantiated
-load_dotenv()
+# Load .env from backend directory (works regardless of cwd when running uvicorn)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=_env_path)
 
 
 class Settings(BaseModel):
@@ -76,6 +79,19 @@ class Settings(BaseModel):
         description="Maximum number of recipe recommendations to return"
     )
     
+    # Semantic re-ranking (Phase 1: transformer replacement)
+    USE_SEMANTIC_RERANK: bool = Field(
+        default=True,
+        description="Use sentence-transformers to re-rank substitutes by semantic similarity"
+    )
+
+    SEMANTIC_WEIGHT: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Weight for semantic similarity in substitute ranking (flavor+health+semantic sum to 1.0)"
+    )
+
     # Swap Configuration
     MAX_SWAPS_PER_REQUEST: int = Field(
         default=10,

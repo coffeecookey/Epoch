@@ -7,7 +7,7 @@ formatting, and data manipulation used throughout the application.
 
 import re
 import logging
-from typing import Optional
+from typing import Dict, List, Optional
 
 from app.utils.constants import INGREDIENT_CATEGORY_KEYWORDS
 
@@ -240,3 +240,106 @@ def safe_divide(numerator: float, denominator: float, default: float = 0.0) -> f
     if denominator == 0:
         return default
     return numerator / denominator
+
+
+# Ingredient-to-nutrition heuristics for fallback estimation (per serving)
+_ESTIMATE_SUGAR_KEYWORDS = [
+    "sugar", "honey", "syrup", "molasses", "maple", "corn syrup",
+    "dextrose", "fructose", "sweetener", "chocolate", "cocoa"
+]
+_ESTIMATE_SODIUM_KEYWORDS = [
+    "salt", "soy sauce", "fish sauce", "bouillon", "broth", "stock",
+    "bacon", "ham", "sausage", "pickle", "capers", "anchovy"
+]
+_ESTIMATE_SAT_FAT_KEYWORDS = [
+    "butter", "cream", "cheese", "bacon", "lard", "shortening",
+    "coconut milk", "coconut cream", "sour cream"
+]
+_ESTIMATE_PROTEIN_KEYWORDS = [
+    "chicken", "beef", "pork", "lamb", "fish", "shrimp", "tofu",
+    "egg", "lentil", "bean", "chickpea", "quinoa", "tempeh"
+]
+_ESTIMATE_FIBER_KEYWORDS = [
+    "oat", "bran", "whole wheat", "whole grain", "quinoa", "barley",
+    "broccoli", "spinach", "kale", "carrot", "bean", "lentil",
+    "chickpea", "apple", "berry", "avocado"
+]
+_ESTIMATE_TRANS_FAT_KEYWORDS = [
+    "shortening", "margarine", "hydrogenated", "partially hydrogenated"
+]
+
+
+def estimate_nutrition_from_ingredients(ingredients: List[str]) -> Dict[str, float]:
+    """
+    Estimate nutrition per serving from ingredient names when RecipeDB is unavailable.
+
+    Uses keyword matching to detect sugar, sodium, saturated fat, protein, fiber,
+    and trans fat. Produces varied scores so health score is not always 60.
+
+    Args:
+        ingredients: List of ingredient strings
+
+    Returns:
+        Dict with keys: calories, protein, carbs, fat, saturated_fat, trans_fat,
+        sodium, sugar, cholesterol, fiber
+    """
+    if not ingredients:
+        return {
+            "calories": 200.0, "protein": 8.0, "carbs": 25.0, "fat": 8.0,
+            "saturated_fat": 2.0, "trans_fat": 0.0, "sodium": 200.0,
+            "sugar": 5.0, "cholesterol": 20.0, "fiber": 2.0,
+        }
+
+    all_text = " ".join(i.lower() for i in ingredients)
+    n = max(1, len(ingredients))
+
+    # Base per serving (moderate recipe)
+    base_cal = 200 + 40 * n
+    protein = 12.0
+    carbs = 25.0
+    fat = 8.0
+    saturated_fat = 2.5
+    trans_fat = 0.0
+    sodium = 200.0
+    sugar = 6.0
+    fiber = 3.0
+
+    # Accumulate contributions from detected ingredients (drives score differentiation)
+    sugar_count = sum(1 for kw in _ESTIMATE_SUGAR_KEYWORDS if kw in all_text)
+    if sugar_count:
+        sugar += 20 * sugar_count  # Push over 25g threshold → penalty
+        carbs += 10 * sugar_count
+
+    sodium_count = sum(1 for kw in _ESTIMATE_SODIUM_KEYWORDS if kw in all_text)
+    if sodium_count:
+        sodium += 300 * sodium_count  # Push over 400mg → penalty
+
+    sat_fat_count = sum(1 for kw in _ESTIMATE_SAT_FAT_KEYWORDS if kw in all_text)
+    if sat_fat_count:
+        saturated_fat += 8 * sat_fat_count  # Push over 10g → penalty
+        fat += 10 * sat_fat_count
+
+    protein_count = sum(1 for kw in _ESTIMATE_PROTEIN_KEYWORDS if kw in all_text)
+    if protein_count:
+        protein += 10 * protein_count  # Improves macro balance
+
+    fiber_count = sum(1 for kw in _ESTIMATE_FIBER_KEYWORDS if kw in all_text)
+    if fiber_count:
+        fiber += 5 * fiber_count  # Bonus points
+
+    trans_count = sum(1 for kw in _ESTIMATE_TRANS_FAT_KEYWORDS if kw in all_text)
+    if trans_count:
+        trans_fat += 1.0 * trans_count  # Severe penalty
+
+    return {
+        "calories": min(base_cal, 600.0),
+        "protein": min(protein, 50.0),
+        "carbs": min(carbs, 80.0),
+        "fat": min(fat, 45.0),
+        "saturated_fat": min(saturated_fat, 25.0),
+        "trans_fat": trans_fat,
+        "sodium": min(sodium, 2000.0),
+        "sugar": min(sugar, 70.0),
+        "cholesterol": 80.0 if any(k in all_text for k in ["egg", "butter", "cream"]) else 30.0,
+        "fiber": min(fiber, 15.0),
+    }

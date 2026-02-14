@@ -71,7 +71,7 @@ def create_app() -> FastAPI:
     # Configure CORS to allow frontend communication
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:8080"],  # React / Vite / Frontend dev servers
+        allow_origins=["http://localhost:3000", "http://localhost:5173", "http://localhost:8080", "http://localhost:8081", "http://127.0.0.1:8080", "http://127.0.0.1:8081"],  # React / Vite / Frontend dev servers
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -112,7 +112,12 @@ allergen_detector = AllergenDetector()
 recommendation_engine = RecommendationEngine(recipedb_service, health_scorer)
 ingredient_analyzer = IngredientAnalyzer()
 flavordb_service = FlavorDBService()
-swap_engine = SwapEngine(flavordb_service, health_scorer)
+swap_engine = SwapEngine(
+    flavordb_service,
+    health_scorer,
+    use_semantic_rerank=settings.USE_SEMANTIC_RERANK,
+    semantic_weight=settings.SEMANTIC_WEIGHT,
+)
 llm_explainer = LLMExplainer() if settings.USE_LLM_EXPLANATIONS else None
 
 # Initialize LLM swap agent (if configured)
@@ -394,16 +399,11 @@ async def analyze_full(request: FullAnalysisRequest) -> FullAnalysisResponse:
                 detail=error_message
             )
 
-        # Fallback nutrition estimates when RecipeDB data unavailable (shouldn't reach here if API failed)
+        # Fallback nutrition estimates when RecipeDB data unavailable (custom ingredients only)
         if nutrition_data is None:
-            logger.warning("⚠️ Using FALLBACK nutrition data - API call may have failed!")
-            logger.warning("⚠️ This will result in inaccurate health scores. Check API connectivity and API key.")
-            nutrition_data = {
-                "calories": 250.0, "protein": 10.0, "carbs": 30.0,
-                "fat": 12.0, "saturated_fat": 4.0, "trans_fat": 0.0,
-                "sodium": 300.0, "sugar": 15.0, "cholesterol": 30.0,
-                "fiber": 2.0,
-            }
+            from app.utils.helpers import estimate_nutrition_from_ingredients
+            logger.warning("⚠️ Using ingredient-based nutrition estimate (RecipeDB not available)")
+            nutrition_data = estimate_nutrition_from_ingredients(ingredients)
         if micro_nutrition_data is None:
             logger.warning("⚠️ Using FALLBACK micronutrient data - API call may have failed!")
             micro_nutrition_data = {

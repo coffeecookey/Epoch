@@ -265,30 +265,44 @@ class RecipeDBService:
     def _parse_nutrition_response(self, response: Dict) -> Dict:
         """
         Parse and standardize nutrition API response.
-        
-        Handles different possible response formats and ensures consistent
-        output structure with default values for missing fields.
-        
+
+        Handles different possible response formats (including case variants)
+        and ensures consistent output structure with default values for missing fields.
+
         Args:
             response: Raw API response
-            
+
         Returns:
             Dict: Standardized nutrition data
         """
+        def _get(d: Dict, *keys, default=0):
+            """Get value by any of the keys (case-insensitive)."""
+            d_lower = {str(k).lower(): v for k, v in d.items()} if isinstance(d, dict) else {}
+            for key in keys:
+                k = str(key).lower()
+                if k in d_lower:
+                    try:
+                        return float(d_lower[k])
+                    except (TypeError, ValueError):
+                        pass
+            return default
+
         # Handle nested response structure if present
         data = response.get("nutrition", response)
-        
+        if not isinstance(data, dict):
+            data = {}
+
         return {
-            "calories": float(data.get("calories", 0)),
-            "protein": float(data.get("protein", 0)),
-            "carbs": float(data.get("carbohydrates", data.get("carbs", 0))),
-            "fat": float(data.get("fat", data.get("total_fat", 0))),
-            "saturated_fat": float(data.get("saturated_fat", 0)),
-            "trans_fat": float(data.get("trans_fat", 0)),
-            "sodium": float(data.get("sodium", 0)),
-            "sugar": float(data.get("sugar", data.get("sugars", 0))),
-            "cholesterol": float(data.get("cholesterol", 0)),
-            "fiber": float(data.get("fiber", data.get("dietary_fiber", 0)))
+            "calories": _get(data, "calories", default=0),
+            "protein": _get(data, "protein", default=0),
+            "carbs": _get(data, "carbohydrates", "carbs", default=0),
+            "fat": _get(data, "fat", "total_fat", default=0),
+            "saturated_fat": _get(data, "saturated_fat", default=0),
+            "trans_fat": _get(data, "trans_fat", default=0),
+            "sodium": _get(data, "sodium", default=0),
+            "sugar": _get(data, "sugar", "sugars", default=0),
+            "cholesterol": _get(data, "cholesterol", default=0),
+            "fiber": _get(data, "fiber", "dietary_fiber", default=0)
         }
     
     def fetch_micro_nutrition_info(self, recipe_id: str) -> Dict:
