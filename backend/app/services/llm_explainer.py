@@ -293,6 +293,72 @@ class LLMExplainer:
         """
         logger.warning("[LLM FALLBACK] LLM API not implemented for swap explanation - falling back to template")
         return self._template_swap_explanation(swaps, original_score, projected_score)
+
+    def generate_llm_swap_explanation(
+        self,
+        swaps: List[Dict],
+        original_score: HealthScore,
+        projected_score: HealthScore,
+        ingredients: List[str],
+    ) -> str:
+        """
+        Generate a rich, scientific swap explanation using Gemini LLM.
+
+        Falls back to template-based explanation if LLM fails.
+
+        Args:
+            swaps: List of swap dicts (each has 'original', 'substitute',
+                   and optionally 'alternatives' with shared_molecules)
+            original_score: HealthScore before swaps
+            projected_score: HealthScore after swaps
+            ingredients: Full recipe ingredient list
+
+        Returns:
+            str: Natural-language explanation
+        """
+        if not self.api_key:
+            return self._template_swap_explanation(swaps, original_score, projected_score)
+
+        try:
+            from google import genai
+
+            # Build a structured prompt with molecule evidence
+            swap_lines = []
+            for s in swaps[:5]:
+                sub = s.get("substitute", {})
+                molecules = sub.get("shared_molecules", [])
+                mol_str = f" (shared flavor molecules: {', '.join(molecules[:5])})" if molecules else ""
+                swap_lines.append(
+                    f"  - {s.get('original', '?')} → {sub.get('name', '?')} "
+                    f"(flavor match {sub.get('flavor_match', 0):.0f}%{mol_str})"
+                )
+
+            prompt = (
+                "You are a nutrition scientist explaining ingredient swaps to a home cook. "
+                "Write 3-4 sentences explaining why these swaps improve the recipe, "
+                "referencing the shared flavor molecules that preserve taste.\n\n"
+                f"Recipe ingredients: {', '.join(ingredients[:15])}\n"
+                f"Original health score: {original_score.score:.0f}/100 ({original_score.rating})\n"
+                f"Projected health score: {projected_score.score:.0f}/100 ({projected_score.rating})\n"
+                f"Swaps:\n" + "\n".join(swap_lines) + "\n\n"
+                "Be concise, evidence-based, and encouraging. "
+                "Mention specific molecules when available. No bullet points or headings."
+            )
+
+            client = genai.Client(api_key=self.api_key)
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+            )
+            text = response.text.strip() if response and response.text else None
+            if text:
+                logger.info("🚨 [LLM] Swap explanation generated via Gemini")
+                return text
+        except Exception as e:
+            logger.warning(f"LLM swap explanation failed: {e}")
+            logger.warning("[LLM FALLBACK] Gemini failed for swap explanation. Using template.")
+
+        return self._template_swap_explanation(swaps, original_score, projected_score)
     
     def _api_analysis_summary(self, full_analysis: Dict) -> str:
         """

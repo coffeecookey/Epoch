@@ -79,7 +79,8 @@ UNHEALTHY_KEYWORDS: Dict[str, List[str]] = {
     ],
     "refined": [
         "refined", "white flour", "white sugar", "white rice",
-        "refined sugar", "refined oil"
+        "refined sugar", "refined oil", "maida", "all purpose flour",
+        "all-purpose flour"
     ],
     "artificial": [
         "artificial", "aspartame", "saccharin", "sucralose",
@@ -96,6 +97,15 @@ UNHEALTHY_KEYWORDS: Dict[str, List[str]] = {
     "preservative": [
         "bha", "bht", "sodium benzoate", "sodium nitrite",
         "potassium sorbate", "tbhq"
+    ],
+    "high_fat": [
+        "butter", "cream", "heavy cream", "ghee", "lard",
+        "margarine", "cream cheese", "coconut cream",
+        "coconut oil", "palm oil", "vanaspati"
+    ],
+    "high_sugar": [
+        "sugar", "honey", "jaggery", "maple syrup", "corn syrup",
+        "molasses", "condensed milk"
     ]
 }
 
@@ -104,8 +114,10 @@ UNHEALTHY_KEYWORDS: Dict[str, List[str]] = {
 RISKY_INGREDIENT_CATEGORIES: Dict[str, str] = {
     "trans_fat": "critical",
     "artificial": "high",
+    "high_fat": "high",
     "refined": "medium",
     "high_sodium": "medium",
+    "high_sugar": "medium",
     "processed": "low",
     "preservative": "low"
 }
@@ -183,9 +195,13 @@ HEALTHY_SWAPS: Dict[str, Dict[str, List[str]]] = {
     "oil": {
         "vegetable oil": ["olive oil", "avocado oil", "coconut oil"],
         "butter": ["ghee", "olive oil", "avocado", "coconut oil"],
+        "ghee": ["olive oil", "avocado oil", "coconut oil"],
         "margarine": ["olive oil", "avocado oil"],
         "shortening": ["coconut oil", "applesauce"],
-        "lard": ["olive oil", "avocado oil"]
+        "lard": ["olive oil", "avocado oil"],
+        "coconut oil": ["olive oil", "avocado oil"],
+        "palm oil": ["olive oil", "avocado oil", "sunflower oil"],
+        "vanaspati": ["olive oil", "avocado oil"]
     },
     
     "sweetener": {
@@ -193,12 +209,18 @@ HEALTHY_SWAPS: Dict[str, Dict[str, List[str]]] = {
         "white sugar": ["coconut sugar", "date sugar", "honey"],
         "brown sugar": ["coconut sugar", "maple syrup", "date sugar"],
         "corn syrup": ["honey", "maple syrup", "agave nectar"],
-        "high fructose corn syrup": ["honey", "maple syrup"]
+        "high fructose corn syrup": ["honey", "maple syrup"],
+        "jaggery": ["coconut sugar", "date sugar", "stevia"],
+        "condensed milk": ["coconut cream", "evaporated milk"],
+        "honey": ["maple syrup", "date syrup", "stevia"],
+        "molasses": ["maple syrup", "date syrup"]
     },
     
     "dairy": {
         "cream": ["coconut cream", "cashew cream"],
         "heavy cream": ["coconut cream", "cashew cream"],
+        "coconut cream": ["cashew cream", "silken tofu blend"],
+        "cream cheese": ["greek yogurt", "cashew cream cheese"],
         "milk": ["almond milk", "oat milk", "soy milk", "coconut milk"],
         "whole milk": ["almond milk", "oat milk", "low-fat milk"],
         "sour cream": ["greek yogurt", "coconut cream"],
@@ -227,8 +249,40 @@ HEALTHY_SWAPS: Dict[str, Dict[str, List[str]]] = {
     
     "spice": {
         "salt": ["herbs", "lemon juice", "garlic powder"],
-        "seasoning salt": ["herb blend", "garlic powder"]
-    }
+        "seasoning salt": ["herb blend", "garlic powder"],
+        "black pepper": ["white pepper", "cayenne pepper"],
+    },
+
+    "high_sodium": {
+        "salt": ["herbs", "lemon juice", "garlic powder"],
+        "soy sauce": ["coconut aminos", "tamari"],
+        "bouillon": ["low-sodium broth", "vegetable stock"],
+        "fish sauce": ["coconut aminos", "lime juice"],
+    },
+
+    "high_fat": {
+        "butter": ["olive oil", "avocado oil", "coconut oil"],
+        "cream": ["coconut cream", "cashew cream"],
+        "heavy cream": ["coconut cream", "cashew cream"],
+        "ghee": ["olive oil", "avocado oil"],
+        "lard": ["olive oil", "avocado oil"],
+        "margarine": ["olive oil", "avocado oil"],
+        "cream cheese": ["greek yogurt", "cashew cream cheese"],
+        "coconut cream": ["cashew cream", "silken tofu blend"],
+        "coconut oil": ["olive oil", "avocado oil"],
+        "palm oil": ["olive oil", "avocado oil", "sunflower oil"],
+        "vanaspati": ["olive oil", "avocado oil"],
+    },
+
+    "high_sugar": {
+        "sugar": ["stevia", "monk fruit", "date sugar"],
+        "honey": ["maple syrup", "date syrup", "stevia"],
+        "jaggery": ["coconut sugar", "date sugar", "stevia"],
+        "maple syrup": ["date syrup", "stevia"],
+        "corn syrup": ["honey", "agave nectar"],
+        "molasses": ["date syrup", "stevia"],
+        "condensed milk": ["coconut cream", "evaporated milk"],
+    },
 }
 
 
@@ -258,7 +312,8 @@ INGREDIENT_CATEGORY_KEYWORDS: Dict[str, List[str]] = {
     ],
     "vegetable": [
         "carrot", "broccoli", "spinach", "tomato", "onion", "garlic",
-        "pepper", "lettuce", "cabbage", "kale", "vegetable"
+        "bell pepper", "lettuce", "cabbage", "kale", "vegetable",
+        "potato", "celery", "zucchini", "eggplant", "mushroom"
     ],
     "fruit": [
         "apple", "banana", "orange", "berry", "grape", "melon", "fruit"

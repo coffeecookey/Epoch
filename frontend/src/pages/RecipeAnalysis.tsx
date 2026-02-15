@@ -26,6 +26,8 @@ export default function RecipeAnalysis() {
   const [analysisData, setAnalysisData] = useState<FullAnalysisResponse | null>(null);
   const [finalData, setFinalData] = useState<RecalculateResponse | null>(null);
   const [requestData, setRequestData] = useState<AnalyzeRequest | null>(null);
+  const [selectedImprovement, setSelectedImprovement] = useState<number>(0);
+  const [selectedSwapsCount, setSelectedSwapsCount] = useState<number>(0);
 
   const handleAnalyze = async (data: AnalyzeRequest) => {
     setIsLoading(true);
@@ -107,6 +109,13 @@ export default function RecipeAnalysis() {
     setRequestData(null);
     setError(null);
     setSaved(false);
+    setSelectedImprovement(0);
+    setSelectedSwapsCount(0);
+  };
+
+  const handleSwapSelectionChange = (improvement: number, swaps: Record<string, string>) => {
+    setSelectedImprovement(improvement);
+    setSelectedSwapsCount(Object.keys(swaps).length);
   };
 
   const handleSaveToRecipes = () => {
@@ -180,10 +189,20 @@ export default function RecipeAnalysis() {
                     title="Original Score"
                     showBreakdown={true}
                   />
-                  {analysisData.improved_health_score ? (
+                  {selectedSwapsCount > 0 ? (
+                    <HealthScoreDisplay
+                      healthScore={{
+                        score: Math.min(100, Math.max(0, analysisData.original_health_score.score + selectedImprovement)),
+                        rating: analysisData.improved_health_score?.rating || "Good",
+                        breakdown: analysisData.improved_health_score?.breakdown || {},
+                      }}
+                      title="Projected Score (Selected)"
+                      showBreakdown={false}
+                    />
+                  ) : analysisData.improved_health_score ? (
                     <HealthScoreDisplay
                       healthScore={analysisData.improved_health_score}
-                      title="Potential Score"
+                      title="Max Potential Score"
                       showBreakdown={true}
                     />
                   ) : (
@@ -194,10 +213,17 @@ export default function RecipeAnalysis() {
                     </Card>
                   )}
                 </div>
-                {analysisData.score_improvement > 0 && (
+                {selectedSwapsCount > 0 && (
+                  <div className="text-center mt-4 p-4 bg-blue-100 rounded-lg">
+                    <p className="text-blue-900 font-semibold">
+                      Selected {selectedSwapsCount} swap{selectedSwapsCount > 1 ? 's' : ''}: +{selectedImprovement.toFixed(1)} points
+                    </p>
+                  </div>
+                )}
+                {selectedSwapsCount === 0 && analysisData.score_improvement > 0 && (
                   <div className="text-center mt-4 p-4 bg-green-100 rounded-lg">
                     <p className="text-green-800 font-semibold">
-                      Potential improvement: +{analysisData.score_improvement.toFixed(1)} points
+                      Max potential improvement: +{analysisData.score_improvement.toFixed(1)} points (all swaps)
                     </p>
                   </div>
                 )}
@@ -217,6 +243,7 @@ export default function RecipeAnalysis() {
                 riskyIngredients={analysisData.risky_ingredients}
                 scoreImprovement={analysisData.score_improvement}
                 onAcceptSwaps={handleAcceptSwaps}
+                onSelectionChange={handleSwapSelectionChange}
                 isLoading={isLoading}
               />
             </div>

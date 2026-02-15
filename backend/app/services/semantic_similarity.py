@@ -71,8 +71,8 @@ def compute_similarity_scores(
         import numpy as np
         scores = np.dot(cand_embs, orig_emb)
 
-        # Map [-1, 1] to [0, 100]
-        normalized = [(s + 1) / 2 * 100 for s in scores]
+        # Map [-1, 1] to [0, 100] and convert numpy to Python float
+        normalized = [float((s + 1) / 2 * 100) for s in scores]
 
         # Sort by score descending
         ranked = sorted(

@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class SubstituteOption:
     """
     Data class representing a substitute ingredient option.
-    
+
     Attributes:
         name: Substitute ingredient name
         flavor_match: Flavor similarity percentage (0-100)
@@ -39,6 +39,7 @@ class SubstituteOption:
         category: Ingredient category
         rank_score: Combined ranking score
         explanation: Brief explanation of the substitution
+        shared_molecules: Flavor molecules shared with the original ingredient
     """
     name: str
     flavor_match: float
@@ -46,21 +47,18 @@ class SubstituteOption:
     category: str
     rank_score: float
     explanation: Optional[str] = None
-    
+    shared_molecules: Optional[List[str]] = None
+
     def to_dict(self) -> Dict:
-        """
-        Convert substitute option to dictionary format.
-        
-        Returns:
-            Dict: Substitute data as dictionary
-        """
+        """Convert substitute option to dictionary format."""
         return {
             "name": self.name,
             "flavor_match": round(self.flavor_match, 2),
             "health_improvement": round(self.health_improvement, 2),
             "category": self.category,
             "rank_score": round(self.rank_score, 2),
-            "explanation": self.explanation
+            "explanation": self.explanation,
+            "shared_molecules": self.shared_molecules or [],
         }
 
 
@@ -119,133 +117,154 @@ class SwapEngine:
         self,
         risky_ingredient: str,
         flavor_profile: Dict,
-        current_health_score: float = 50.0
+        current_health_score: float = 50.0,
+        recipe_ingredients: Optional[List[str]] = None,
     ) -> List[SubstituteOption]:
         """
         Find healthier alternatives with similar flavor profiles.
-        
+
         This is the main entry point for finding ingredient substitutes.
-        It identifies candidate alternatives, calculates flavor similarity,
-        estimates health improvements, and ranks options.
-        
-        Algorithm:
-        1. Categorize the risky ingredient
-        2. Get pool of healthy alternatives for that category
-        3. Fetch flavor profiles for each candidate
-        4. Calculate flavor similarity scores
-        5. Estimate health improvements
-        6. Rank candidates by combined score
-        7. Return top substitutes
-        
+        It combines three candidate sources:
+        1. Ingredient-specific entries in HEALTHY_SWAPS (exact match first)
+        2. FlavorDB flavor-pairings endpoint (molecule-aware discovery)
+        3. Category-level fallback from HEALTHY_SWAPS
+
+        Candidates are then ranked by FlavorDB molecule similarity, estimated
+        health improvement, and sentence-transformer semantic similarity.
+
         Args:
             risky_ingredient: Name of ingredient to replace
             flavor_profile: Flavor profile dict from FlavorDB
-                {
-                    "ingredient": str,
-                    "molecules": [...],
-                    "primary_flavors": [...],
-                    "category": str
-                }
             current_health_score: Current recipe health score (0-100)
-            
+            recipe_ingredients: Full list of recipe ingredients (for context)
+
         Returns:
-            List[SubstituteOption]: Ranked list of substitute options
-                                    (best matches first).
-                                    Returns empty list if no suitable substitutes found.
-                                    
-        Example:
-            engine = SwapEngine(flavordb_service, health_scorer)
-            substitutes = engine.find_substitutes(
-                "butter",
-                flavor_profile,
-                current_health_score=45.0
-            )
+            List[SubstituteOption]: Ranked substitutes (best first, up to 5).
         """
         logger.info(
             f"Finding substitutes for: {risky_ingredient} "
             f"(current health score: {current_health_score})"
         )
-        
-        # Step 1: Categorize ingredient
+
         normalized = normalize_ingredient_name(risky_ingredient)
         category = categorize_ingredient(normalized)
-        
         logger.debug(f"Ingredient category: {category}")
-        
-        # Step 2: Get healthy alternative pool
-        candidates = self.get_healthy_alternative_pool(category)
-        
+
+        # ── Candidate discovery (multi-source) ────────────────────────
+        candidates = self.get_healthy_alternative_pool(normalized, category)
+
+        # Augment with FlavorDB pairings — these are molecule-aware
+        try:
+            fdb_pairings = self.flavordb_service.get_flavor_pairings(risky_ingredient)
+            if fdb_pairings:
+                seen = {normalize_ingredient_name(c) for c in candidates}
+                for p in fdb_pairings:
+                    norm_p = normalize_ingredient_name(p)
+                    if norm_p not in seen and norm_p != normalized:
+                        candidates.append(p)
+                        seen.add(norm_p)
+                logger.info(
+                    f"FlavorDB pairings added {len(fdb_pairings)} extra candidates "
+                    f"for '{risky_ingredient}'"
+                )
+        except Exception as e:
+            logger.warning(f"FlavorDB pairings lookup failed for '{risky_ingredient}': {e}")
+
+        # Remove the risky ingredient itself and any already in the recipe
+        recipe_normalized = set()
+        if recipe_ingredients:
+            recipe_normalized = {normalize_ingredient_name(i) for i in recipe_ingredients}
+        candidates = [
+            c for c in candidates
+            if normalize_ingredient_name(c) != normalized
+            and normalize_ingredient_name(c) not in recipe_normalized
+        ]
+
         if not candidates:
-            logger.warning(
-                f"No healthy alternatives found for category: {category}"
-            )
+            logger.warning(f"No candidates found for '{risky_ingredient}'")
             return []
-        
-        logger.debug(f"Found {len(candidates)} candidate substitutes")
-        
-        # Step 3: Rank substitutes
-        ranked_substitutes = self.rank_substitutes(
-            candidates,
-            flavor_profile,
-            current_health_score
+
+        logger.info(f"Total candidates for '{risky_ingredient}': {len(candidates)}")
+
+        # ── Rank candidates ───────────────────────────────────────────
+        ranked = self.rank_substitutes(
+            candidates, flavor_profile, current_health_score
         )
-        
+
         logger.info(
-            f"Identified {len(ranked_substitutes)} substitute option(s) "
-            f"for {risky_ingredient}"
+            f"Returning {len(ranked)} substitute(s) for {risky_ingredient}"
         )
-        
-        return ranked_substitutes
-    
-    def get_healthy_alternative_pool(self, ingredient_category: str) -> List[str]:
+        return ranked
+
+    def get_healthy_alternative_pool(
+        self, ingredient_name: str, ingredient_category: str
+    ) -> List[str]:
         """
-        Get pool of healthy alternative ingredients for a category.
-        
-        Uses predefined database of healthy swaps from constants.py.
-        Each category has a curated list of healthier alternatives.
-        
+        Get pool of healthy alternative ingredients.
+
+        Priority order:
+        1. Exact-match key in HEALTHY_SWAPS[category] for this specific ingredient
+        2. Partial-match keys (ingredient name contained in key or vice-versa)
+        3. Full category fallback (all alternatives in the category)
+
+        This ensures 'butter' and 'lard' get DIFFERENT alternatives instead of
+        the same flattened pool.
+
         Args:
-            ingredient_category: Category (e.g., "oil", "sweetener", "dairy")
-            
+            ingredient_name: Normalized ingredient name
+            ingredient_category: Category string
+
         Returns:
-            List[str]: List of healthier ingredient names for this category.
-                      Returns empty list if category not found or no alternatives.
-                      
-        Example:
-            alternatives = engine.get_healthy_alternative_pool("oil")
-            # Returns: ["olive oil", "avocado oil", "coconut oil"]
+            List[str]: Candidate alternative names (de-duplicated).
         """
-        logger.debug(f"Getting healthy alternatives for category: {ingredient_category}")
-        
-        # Get category-specific alternatives
-        category_swaps = self.healthy_swaps.get(ingredient_category, {})
-        
-        if not category_swaps:
-            logger.warning(
-                f"No healthy swaps defined for category: {ingredient_category}"
-            )
-            return []
-        
-        # Flatten all alternatives from this category
-        all_alternatives = []
-        for original, alternatives in category_swaps.items():
-            all_alternatives.extend(alternatives)
-        
-        # Remove duplicates while preserving order
-        unique_alternatives = []
-        seen = set()
-        for alt in all_alternatives:
-            normalized = normalize_ingredient_name(alt)
-            if normalized not in seen:
-                seen.add(normalized)
-                unique_alternatives.append(alt)
-        
         logger.debug(
-            f"Found {len(unique_alternatives)} unique alternatives "
-            f"for category: {ingredient_category}"
+            f"Getting alternatives for '{ingredient_name}' "
+            f"(category: {ingredient_category})"
         )
-        
-        return unique_alternatives
+
+        category_swaps = self.healthy_swaps.get(ingredient_category, {})
+        if not category_swaps:
+            logger.warning(f"No HEALTHY_SWAPS for category: {ingredient_category}")
+            return []
+
+        # 1. Exact key match
+        if ingredient_name in category_swaps:
+            alts = list(category_swaps[ingredient_name])
+            logger.debug(f"Exact match '{ingredient_name}' → {len(alts)} alternatives")
+            return alts
+
+        # 2. Partial match — ingredient name appears in key or key in name
+        partial: List[str] = []
+        for key, alts in category_swaps.items():
+            if ingredient_name in key or key in ingredient_name:
+                partial.extend(alts)
+        if partial:
+            # de-dup
+            seen, unique = set(), []
+            for a in partial:
+                na = normalize_ingredient_name(a)
+                if na not in seen:
+                    seen.add(na)
+                    unique.append(a)
+            logger.debug(
+                f"Partial match for '{ingredient_name}' → {len(unique)} alternatives"
+            )
+            return unique
+
+        # 3. Full-category fallback
+        all_alts: List[str] = []
+        for alts in category_swaps.values():
+            all_alts.extend(alts)
+        seen, unique = set(), []
+        for a in all_alts:
+            na = normalize_ingredient_name(a)
+            if na not in seen:
+                seen.add(na)
+                unique.append(a)
+        logger.debug(
+            f"Category fallback for '{ingredient_name}' → {len(unique)} alternatives"
+        )
+        return unique
     
     def rank_substitutes(
         self,
@@ -254,114 +273,119 @@ class SwapEngine:
         current_health_score: float
     ) -> List[SubstituteOption]:
         """
-        Rank substitute candidates by flavor match and health improvement.
-        
-        Uses a weighted scoring formula:
-        rank_score = (flavor_similarity * 0.6) + (health_improvement * 0.4)
-        
-        This balances preserving taste (60%) with improving health (40%).
-        
-        Args:
-            candidates: List of candidate ingredient names
-            target_flavor: Flavor profile to match against
-            current_health_score: Current recipe health score
-            
-        Returns:
-            List[SubstituteOption]: Ranked substitutes (best first)
+        Rank substitute candidates by FlavorDB molecule similarity,
+        health improvement, and sentence-transformer semantic closeness.
+
+        Returns up to 5 best options so the frontend can show multiple choices.
         """
         logger.info(
             f"Ranking {len(candidates)} substitute candidates "
             f"against target flavor"
         )
-        
+
+        original_name = target_flavor.get("ingredient", "")
+        original_molecules = [
+            m.get("common_name") or m.get("name", "")
+            for m in target_flavor.get("molecules", [])
+        ]
         substitute_options = []
-        
+
         for candidate in candidates:
-            # Skip if candidate is same as target
             if normalize_ingredient_name(candidate) == \
-               normalize_ingredient_name(target_flavor.get("ingredient", "")):
+               normalize_ingredient_name(original_name):
                 continue
-            
+
             try:
-                # Calculate flavor similarity
+                # 1. Flavor similarity via FlavorDB molecule Jaccard
                 flavor_match = self.flavordb_service.calculate_flavor_similarity(
-                    target_flavor.get("ingredient", ""),
-                    candidate
+                    original_name, candidate
                 )
-                
-                # Estimate health improvement
+
+                # 2. Find shared molecules for explainability
+                cand_profile = self.flavordb_service.get_flavor_profile_by_ingredient(candidate)
+                cand_molecules = [
+                    m.get("common_name") or m.get("name", "")
+                    for m in cand_profile.get("molecules", [])
+                ]
+                shared_molecules = sorted(
+                    set(m.lower() for m in original_molecules if m)
+                    & set(m.lower() for m in cand_molecules if m)
+                )
+
+                # 3. Health improvement estimate
                 health_improvement = self._estimate_health_improvement(
-                    candidate,
-                    current_health_score
+                    candidate, current_health_score
                 )
-                
-                # Calculate combined rank score
-                rank_score = (
-                    (flavor_match * self.flavor_weight) +
-                    (health_improvement * self.health_weight)
+
+                # 4. Combined rank (convert to Python float for JSON serialization)
+                rank_score = float(
+                    (flavor_match * self.flavor_weight)
+                    + (health_improvement * self.health_weight)
                 )
-                
-                # Generate explanation
+
+                # 5. Explanation with molecule evidence
                 explanation = self._generate_swap_explanation(
-                    target_flavor.get("ingredient", ""),
-                    candidate,
-                    flavor_match,
-                    health_improvement
+                    original_name, candidate, flavor_match,
+                    health_improvement, shared_molecules
                 )
-                
-                # Create SubstituteOption
+
                 option = SubstituteOption(
                     name=candidate,
-                    flavor_match=flavor_match,
-                    health_improvement=health_improvement,
+                    flavor_match=float(flavor_match),
+                    health_improvement=float(health_improvement),
                     category=categorize_ingredient(candidate),
                     rank_score=rank_score,
-                    explanation=explanation
+                    explanation=explanation,
+                    shared_molecules=shared_molecules[:8],  # top 8 for display
                 )
-                
                 substitute_options.append(option)
-                
+
                 logger.debug(
                     f"Ranked {candidate}: flavor={flavor_match:.1f}%, "
                     f"health_improvement={health_improvement:.1f}, "
-                    f"rank_score={rank_score:.2f}"
+                    f"rank_score={rank_score:.2f}, "
+                    f"shared_molecules={len(shared_molecules)}"
                 )
-                
+
             except Exception as e:
                 logger.warning(
                     f"Error processing candidate {candidate}: {str(e)}"
                 )
-                logger.warning(f"[COSYLAB API FALLBACK] FlavorDB flavor similarity lookup failed for swap candidate '{candidate}'. Skipping this candidate.")
+                logger.warning(
+                    f"[COSYLAB API FALLBACK] FlavorDB flavor similarity "
+                    f"lookup failed for swap candidate '{candidate}'. "
+                    f"Skipping this candidate."
+                )
                 continue
-        
-        # Semantic re-ranking (Phase 1: transformer replacement)
+
+        # ── Semantic re-ranking ───────────────────────────────────────
         if self.use_semantic_rerank and substitute_options:
-            original_ingredient = target_flavor.get("ingredient", "")
             candidate_names = [opt.name for opt in substitute_options]
-            ranked_semantic = compute_similarity_scores(original_ingredient, candidate_names)
+            ranked_semantic = compute_similarity_scores(original_name, candidate_names)
             if ranked_semantic:
-                semantic_map = {name: score for name, score in ranked_semantic}
+                semantic_map = {name: float(score) for name, score in ranked_semantic}
                 for opt in substitute_options:
-                    semantic_score = semantic_map.get(opt.name, 50.0)  # 50 = neutral if missing
-                    opt.rank_score = (
-                        (opt.flavor_match * self.flavor_weight) +
-                        (opt.health_improvement * self.health_weight) +
-                        (semantic_score * self.semantic_weight)
+                    semantic_score = semantic_map.get(opt.name, 50.0)
+                    opt.rank_score = float(
+                        (opt.flavor_match * self.flavor_weight)
+                        + (opt.health_improvement * self.health_weight)
+                        + (semantic_score * self.semantic_weight)
                     )
                 logger.debug(
-                    "Applied semantic re-ranking. Top semantic matches: %s",
+                    "Applied semantic re-ranking. Top: %s",
                     ranked_semantic[:3] if len(ranked_semantic) >= 3 else ranked_semantic,
                 )
-        
-        # Sort by rank score (descending)
+
         substitute_options.sort(key=lambda x: x.rank_score, reverse=True)
-        
+
+        # Return top 5 so the UI can present choices
+        top = substitute_options[:5]
         logger.info(
             f"Ranked {len(substitute_options)} substitutes. "
-            f"Top option: {substitute_options[0].name if substitute_options else 'None'}"
+            f"Returning top {len(top)}. "
+            f"Best: {top[0].name if top else 'None'}"
         )
-        
-        return substitute_options
+        return top
     
     def _estimate_health_improvement(
         self,
@@ -442,30 +466,23 @@ class SwapEngine:
         original: str,
         substitute: str,
         flavor_match: float,
-        health_improvement: float
+        health_improvement: float,
+        shared_molecules: Optional[List[str]] = None,
     ) -> str:
         """
-        Generate human-readable explanation for a swap recommendation.
-        
-        Args:
-            original: Original ingredient name
-            substitute: Substitute ingredient name
-            flavor_match: Flavor similarity percentage
-            health_improvement: Estimated health score improvement
-            
-        Returns:
-            str: Explanation text
+        Generate human-readable explanation for a swap recommendation,
+        including FlavorDB molecule evidence when available.
         """
         # Flavor match description
         if flavor_match >= 80:
-            flavor_desc = "very similar flavor"
+            flavor_desc = "very similar flavor profile"
         elif flavor_match >= 60:
-            flavor_desc = "similar flavor"
+            flavor_desc = "similar flavor profile"
         elif flavor_match >= 40:
-            flavor_desc = "moderately different flavor"
+            flavor_desc = "moderately similar flavor"
         else:
-            flavor_desc = "noticeably different flavor"
-        
+            flavor_desc = "different but complementary flavor"
+
         # Health improvement description
         if health_improvement >= 8:
             health_desc = "significantly healthier"
@@ -475,12 +492,19 @@ class SwapEngine:
             health_desc = "slightly healthier"
         else:
             health_desc = "marginally healthier"
-        
+
         explanation = (
-            f"Replace {original} with {substitute} ({flavor_desc}, "
-            f"{health_desc})"
+            f"Replace {original} with {substitute} — "
+            f"{flavor_desc} ({flavor_match:.0f}% match), {health_desc}."
         )
-        
+
+        if shared_molecules:
+            mol_str = ", ".join(shared_molecules[:5])
+            explanation += (
+                f" They share {len(shared_molecules)} flavor molecule(s) "
+                f"({mol_str}), preserving the taste you expect."
+            )
+
         return explanation
     
     def apply_swaps(
@@ -570,19 +594,18 @@ class SwapEngine:
         """
         Estimate new nutrition data after applying swaps.
 
-        Each swap only affects the proportional share of nutrition
-        attributable to that ingredient (roughly 1/N of total, where N
-        is the number of ingredients). This prevents a single swap from
-        unrealistically changing the entire recipe's nutrition profile.
+        Uses adjustment factors from ``_get_nutrition_adjustments`` but
+        only modifies health-penalty nutrients (sugar, sodium,
+        saturated_fat, trans_fat, cholesterol) and fiber.  Calories,
+        protein, carbs, and fat are left unchanged so macro-percentage
+        scoring is not distorted.
 
-        Args:
-            original_nutrition: Original nutrition data
-            swaps: List of swap dictionaries
-            total_ingredients: Total number of ingredients in recipe (used
-                to estimate per-ingredient share; 0 = auto-estimate from swaps)
-
-        Returns:
-            Dict: Estimated new nutrition data
+        The per-ingredient share is set to ``1 / max(N, 3)`` where N is
+        the number of major ingredients (capped at a minimum of 3 so that
+        each swap has a meaningful impact).  When the original value of a
+        nutrient is 0 but the factor would *add* value (factor > 1.0, e.g.
+        fiber boost), a small baseline is injected so the increase is
+        visible.
         """
         logger.info("Estimating nutrition with swaps applied")
 
@@ -592,23 +615,26 @@ class SwapEngine:
         if not accepted_swaps:
             return new_nutrition
 
-        # Estimate per-ingredient share of total nutrition
-        num_ingredients = max(total_ingredients, len(accepted_swaps) + 3)
+        # Use a share that is impactful but not overpowering.
+        # Cap denominator at max(total, swaps+2) but floor at 3 so a
+        # single swap still changes about 33% of the nutrient.
+        num_ingredients = max(total_ingredients, len(accepted_swaps) + 2, 3)
         ingredient_share = 1.0 / num_ingredients
 
-        # Only adjust nutrients that feed into health-score penalties
-        # (negative factors) and fiber.  Never touch calories, protein,
-        # carbs or fat — changing the calorie denominator without
-        # proportionally changing macros distorts percentage-based
-        # macro scoring and can make the score *decrease*.
         ADJUSTABLE_NUTRIENTS = {
             "sugar", "sodium", "saturated_fat", "trans_fat",
             "cholesterol", "fiber",
         }
 
+        # Small baselines for when the original value is 0 but we want to
+        # model an *increase* (e.g. fiber from lentils, sugar from honey).
+        BASELINE = {
+            "sugar": 5.0, "sodium": 50.0, "saturated_fat": 2.0,
+            "trans_fat": 0.0, "cholesterol": 20.0, "fiber": 2.0,
+        }
+
         for swap in accepted_swaps:
             substitute_obj = swap.get("substitute", {})
-
             if isinstance(substitute_obj, SubstituteOption):
                 substitute_name = substitute_obj.name
             else:
@@ -618,30 +644,34 @@ class SwapEngine:
 
             for nutrient, factor in adjustments.items():
                 if nutrient not in ADJUSTABLE_NUTRIENTS:
-                    # Skip calories/fat/carbs/protein to preserve
-                    # macro-percentage balance.
                     continue
-                if nutrient in new_nutrition:
-                    original_value = new_nutrition[nutrient]
-                    if original_value == 0 and factor < 1.0:
-                        # If original value is 0, multiplying by factor gives 0.
-                        # Skip — there's nothing to reduce.
-                        continue
-                    # Only adjust the portion attributable to this ingredient
-                    ingredient_contribution = original_value * ingredient_share
-                    adjusted_contribution = ingredient_contribution * factor
-                    new_nutrition[nutrient] = (
-                        original_value - ingredient_contribution + adjusted_contribution
-                    )
+                if nutrient not in new_nutrition:
+                    continue
+
+                original_value = new_nutrition[nutrient]
+
+                # Handle zero originals
+                if original_value == 0:
+                    if factor > 1.0:
+                        # Inject a baseline so the increase is visible
+                        # (e.g. adding fiber from lentils)
+                        baseline = BASELINE.get(nutrient, 0)
+                        new_nutrition[nutrient] = baseline * ingredient_share * factor
+                    # else: nothing to reduce, skip
+                    continue
+
+                # Apply proportional adjustment
+                portion = original_value * ingredient_share
+                adjusted = portion * factor
+                new_nutrition[nutrient] = original_value - portion + adjusted
 
         logger.info(
             f"Nutrition after swaps: calories={new_nutrition.get('calories', 0):.1f}, "
             f"sugar={new_nutrition.get('sugar', 0):.1f}, "
             f"sat_fat={new_nutrition.get('saturated_fat', 0):.1f}, "
-            f"sodium={new_nutrition.get('sodium', 0):.1f}"
+            f"sodium={new_nutrition.get('sodium', 0):.1f}, "
+            f"fiber={new_nutrition.get('fiber', 0):.1f}"
         )
-        logger.debug("Nutrition estimation complete")
-
         return new_nutrition
     
     def _get_nutrition_adjustments(self, substitute_name: str) -> Dict[str, float]:

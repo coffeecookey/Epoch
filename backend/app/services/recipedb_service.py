@@ -435,72 +435,71 @@ class RecipeDBService:
         self, recipe_id: str, recipe_title: str
     ) -> List[str]:
         """
-        Collect ALL ingredient names for a given recipe from the recipe2-api.
+        Collect ingredient names for a given recipe from the recipe2-api.
 
         The by-ingredients-categories-title endpoint returns one row per
-        ingredient.  We search using distinctive keywords from the title
-        and paginate, collecting every row whose Recipe_id matches.
+        recipe per search — i.e., each search surfaces ONE random ingredient
+        for our target recipe.  To collect more, we issue multiple searches
+        using different keyword variations derived from the recipe title.
 
-        Returns a deduplicated list of ingredient names
-        (the ``ingredient`` field, falling back to ``ingredient_Phrase``).
+        Returns a deduplicated list of ingredient phrases.
         """
         target_id = str(recipe_id)
         seen: set = set()
         ingredients: List[str] = []
 
-        # Build a search term that the API will accept.
-        # Extract the most distinctive keyword(s) from the title.
+        # Extract distinctive keywords from the title.
         title_words = [
             w for w in re.split(r"\W+", recipe_title)
             if len(w) >= 2 and w.lower() not in _RECIPE_NAME_STOPWORDS
         ]
-        # Build search terms: try many variations to maximize ingredient rows.
+
+        # Build search terms — each surfaces a DIFFERENT random ingredient.
         search_terms: List[str] = []
         if title_words:
-            search_terms.append(" ".join(title_words))  # all keywords
-            longest = sorted(title_words, key=len, reverse=True)
-            for tw in longest[:3]:
-                # stem first (Shepherd matches Shepherd's in API)
+            # Full title (all keywords together)
+            search_terms.append(" ".join(title_words))
+            # Each individual word (most productive — different word = different result set)
+            for tw in title_words:
+                if tw not in search_terms:
+                    search_terms.append(tw)
                 if tw.lower().endswith("s") and len(tw) > 3:
                     stem = tw[:-1]
                     if stem not in search_terms:
                         search_terms.append(stem)
-                if tw not in search_terms:
-                    search_terms.append(tw)
+            # Try pairs of words for more coverage
+            if len(title_words) >= 2:
+                for i in range(len(title_words)):
+                    for j in range(i + 1, len(title_words)):
+                        pair = f"{title_words[i]} {title_words[j]}"
+                        if pair not in search_terms:
+                            search_terms.append(pair)
         if not search_terms:
             search_terms = [recipe_title.strip()]
 
+        # Limit to avoid excessive API calls (each ~2s with rate limit)
+        search_terms = search_terms[:12]
+
         for term in search_terms:
-            for page in range(1, 11):  # up to 10 pages
-                rows = self._recipe2_api_search(term, page=page, limit=10)
-                if not rows:
-                    break
-                found_any = False
-                for row in rows:
-                    rid = str(row.get("Recipe_id") or row.get("recipe_no") or "")
-                    if rid != target_id:
-                        continue
-                    found_any = True
-                    # Prefer the short "ingredient" name; fall back to full phrase
-                    ing = (
-                        row.get("ingredient")
-                        or row.get("ingredient_Phrase")
-                        or ""
-                    ).strip()
-                    if ing and ing not in seen:
-                        seen.add(ing)
-                        ingredients.append(ing)
-                # If the target recipe didn't appear and we already have some,
-                # we've likely exhausted its rows for this search term.
-                if not found_any and ingredients:
-                    break
-            if len(ingredients) >= 3:
-                # Got a reasonable number, stop trying more search terms
-                break
+            rows = self._recipe2_api_search(term, page=1, limit=10)
+            if not rows:
+                continue
+            for row in rows:
+                rid = str(row.get("Recipe_id") or row.get("recipe_no") or "")
+                if rid != target_id:
+                    continue
+                ing = (
+                    row.get("ingredient")
+                    or row.get("ingredient_Phrase")
+                    or ""
+                ).strip()
+                if ing and ing not in seen:
+                    seen.add(ing)
+                    ingredients.append(ing)
 
         logger.info(
             f"Collected {len(ingredients)} ingredients for recipe {recipe_id} "
-            f"({recipe_title})"
+            f"({recipe_title}) using {len(search_terms)} search terms"
         )
         return ingredients
 

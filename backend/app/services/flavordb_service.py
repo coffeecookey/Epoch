@@ -23,6 +23,7 @@ from functools import lru_cache
 import time
 
 from app.config import settings
+from app.utils.helpers import normalize_ingredient_name
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -190,8 +191,11 @@ class FlavorDBService:
         """
         logger.info(f"Fetching flavor profile for ingredient: {ingredient_name}")
         
-        # Normalize ingredient name (lowercase, trim)
-        normalized_name = ingredient_name.strip().lower()
+        # Extract core ingredient name (removes quantities, prep words, etc.)
+        normalized_name = normalize_ingredient_name(ingredient_name)
+        if not normalized_name:
+            normalized_name = ingredient_name.strip().lower()
+        logger.debug(f"FlavorDB query name: '{normalized_name}' (from '{ingredient_name}')")
         
         params = {"name": normalized_name}
         response = self._make_request("entities_by_readable_name", params)
@@ -285,8 +289,11 @@ class FlavorDBService:
         """
         logger.info(f"Fetching flavor pairings for ingredient: {ingredient_name}")
         
-        # Normalize ingredient name
-        normalized_name = ingredient_name.strip().lower()
+        # Extract core ingredient name
+        normalized_name = normalize_ingredient_name(ingredient_name)
+        if not normalized_name:
+            normalized_name = ingredient_name.strip().lower()
+        logger.debug(f"FlavorDB pairings query: '{normalized_name}' (from '{ingredient_name}')")
         
         params = {"ingredient": normalized_name}
         response = self._make_request("flavor_pairings", params)
@@ -502,9 +509,12 @@ class FlavorDBService:
             similarity = service.calculate_flavor_similarity("butter", "garlic")
             # Returns: ~12.3 (low similarity)
         """
-        logger.info(f"Calculating flavor similarity between: {ingredient1} and {ingredient2}")
+        # Normalize names for display
+        norm1 = normalize_ingredient_name(ingredient1) or ingredient1
+        norm2 = normalize_ingredient_name(ingredient2) or ingredient2
+        logger.info(f"Calculating flavor similarity between: {norm1} and {norm2}")
         
-        # Fetch flavor profiles
+        # Fetch flavor profiles (normalization happens inside)
         profile1 = self.get_flavor_profile_by_ingredient(ingredient1)
         profile2 = self.get_flavor_profile_by_ingredient(ingredient2)
         
