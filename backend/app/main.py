@@ -624,6 +624,7 @@ async def analyze_full(request: FullAnalysisRequest) -> FullAnalysisResponse:
             risky_ingredients = [r.to_dict() for r in risky_objs]
 
             # 7. Generate swap suggestions via FlavorDB
+            # Now returns ALL ranked alternatives per risky ingredient, not just top-1
             swap_objects_for_projection = []
             for risky_obj in risky_objs:
                 try:
@@ -631,13 +632,16 @@ async def analyze_full(request: FullAnalysisRequest) -> FullAnalysisResponse:
                         risky_obj.name
                     )
                     substitutes = swap_engine.find_substitutes(
-                        risky_obj.name, flavor_profile, original_score.score
+                        risky_obj.name, flavor_profile, original_score.score,
+                        recipe_ingredients=ingredients,
                     )
                     if substitutes:
                         top = substitutes[0]
                         swap_dict = {
                             "original": risky_obj.name,
                             "substitute": top.to_dict(),
+                            # All alternatives for the frontend to display
+                            "alternatives": [s.to_dict() for s in substitutes],
                             "accepted": True,
                         }
                         swap_suggestions.append(swap_dict)
@@ -659,18 +663,28 @@ async def analyze_full(request: FullAnalysisRequest) -> FullAnalysisResponse:
                 )
                 score_improvement = round(improved_score.score - original_score.score, 2)
             else:
-                # No risky ingredients found or no swaps available
-                # Use original score as improved score (0 improvement)
                 improved_score = original_score
                 improved_ingredients = ingredients
                 score_improvement = 0.0
 
-            # 9. Generate explanation
-            explainer = LLMExplainer(use_templates=True)
+            # 9. Generate explanation (use LLM if available, else template)
+            use_llm_explain = bool(settings.GEMINI_API_KEY)
+            explainer = LLMExplainer(
+                use_templates=not use_llm_explain,
+                api_key=settings.GEMINI_API_KEY if use_llm_explain else None,
+            )
             if swap_objects_for_projection and improved_score:
-                explanation = explainer.generate_swap_explanation(
-                    swap_objects_for_projection, original_score, improved_score
-                )
+                if use_llm_explain:
+                    explanation = explainer.generate_llm_swap_explanation(
+                        swap_objects_for_projection,
+                        original_score,
+                        improved_score,
+                        ingredients,
+                    )
+                else:
+                    explanation = explainer.generate_swap_explanation(
+                        swap_objects_for_projection, original_score, improved_score
+                    )
             else:
                 explanation = explainer.generate_health_explanation(
                     original_score.score, original_score.rating, nutrition_data

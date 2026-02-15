@@ -29,11 +29,13 @@ export interface SubstituteOption {
   flavor_match: number;
   health_improvement: number;
   reason?: string;
+  shared_molecules?: string[];
 }
 
 export interface Swap {
   original: string;
   substitute: SubstituteOption;
+  alternatives?: SubstituteOption[];
   accepted?: boolean;
 }
 

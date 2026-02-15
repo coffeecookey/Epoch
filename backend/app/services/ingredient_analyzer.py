@@ -92,6 +92,7 @@ class IngredientAnalyzer:
         self.risk_weights = {
             "trans_fat": 10.0,      # Highest risk
             "allergen": 9.0,         # Very high risk
+            "high_fat": 7.0,         # High risk (butter, cream, etc.)
             "artificial": 7.0,       # High risk
             "refined": 6.0,          # Medium-high risk
             "high_sodium": 5.0,      # Medium risk
@@ -267,7 +268,9 @@ class IngredientAnalyzer:
             "artificial": f"Contains artificial additives ({keyword}) with potential health concerns",
             "high_sodium": f"High sodium ingredient ({keyword}) may contribute to hypertension",
             "processed": f"Highly processed ingredient ({keyword}) with lower nutrient density",
-            "preservative": f"Contains preservatives ({keyword}) that may cause sensitivities"
+            "preservative": f"Contains preservatives ({keyword}) that may cause sensitivities",
+            "high_fat": f"High in saturated fat ({keyword}) which may raise cholesterol levels",
+            "high_sugar": f"High in added sugars ({keyword}) which may spike blood glucose"
         }
         
         return reason_templates.get(
@@ -472,6 +475,8 @@ class IngredientAnalyzer:
         
         if "trans fat" in risk_reason.lower():
             impact = self.risk_weights["trans_fat"]
+        elif "saturated fat" in risk_reason.lower():
+            impact = self.risk_weights["high_fat"]
         elif "artificial" in risk_reason.lower():
             impact = self.risk_weights["artificial"]
         elif "refined" in risk_reason.lower():
